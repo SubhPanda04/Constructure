@@ -1,12 +1,98 @@
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { chatAPI } from '../services/api';
+import ChatMessage from '../components/ChatMessage';
+import LoadingSpinner from '../components/LoadingSpinner';
 
 const Dashboard = () => {
     const { user, logout } = useAuth();
+    const [messages, setMessages] = useState([]);
+    const [inputMessage, setInputMessage] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState(null);
+    const messagesEndRef = useRef(null);
+
+    const scrollToBottom = () => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    };
+
+    useEffect(() => {
+        scrollToBottom();
+    }, [messages]);
+
+    useEffect(() => {
+        const sendWelcomeMessage = async () => {
+            try {
+                const response = await chatAPI.sendMessage('Hello');
+                setMessages([
+                    {
+                        role: 'user',
+                        content: 'Hello',
+                        timestamp: new Date().toISOString(),
+                    },
+                    {
+                        role: 'assistant',
+                        content: response.message,
+                        timestamp: response.timestamp,
+                    },
+                ]);
+            } catch (err) {
+                console.error('Welcome message error:', err);
+            }
+        };
+
+        if (user && messages.length === 0) {
+            sendWelcomeMessage();
+        }
+    }, [user]);
+
+    const handleSendMessage = async (e) => {
+        e.preventDefault();
+
+        if (!inputMessage.trim() || isLoading) return;
+
+        const userMessage = {
+            role: 'user',
+            content: inputMessage,
+            timestamp: new Date().toISOString(),
+        };
+
+        setMessages((prev) => [...prev, userMessage]);
+        setInputMessage('');
+        setIsLoading(true);
+        setError(null);
+
+        try {
+            const response = await chatAPI.sendMessage(inputMessage);
+
+            setMessages((prev) => [
+                ...prev,
+                {
+                    role: 'assistant',
+                    content: response.message,
+                    timestamp: response.timestamp,
+                },
+            ]);
+        } catch (err) {
+            console.error('Send message error:', err);
+            setError('Failed to send message. Please try again.');
+            setMessages((prev) => [
+                ...prev,
+                {
+                    role: 'assistant',
+                    content: 'Sorry, I encountered an error processing your request. Please try again.',
+                    timestamp: new Date().toISOString(),
+                },
+            ]);
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
     return (
-        <div className="min-h-screen bg-gray-50">
+        <div className="min-h-screen bg-gray-50 flex flex-col">
             {/* Header */}
-            <header className="bg-white shadow-sm border-b border-gray-200">
+            <header className="bg-white shadow-sm border-b border-gray-200 flex-shrink-0">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-4">
@@ -61,38 +147,64 @@ const Dashboard = () => {
                 </div>
             </header>
 
-            {/* Main Content */}
-            <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                    <h2 className="text-2xl font-bold text-gray-900 mb-4">
-                        Welcome, {user?.name?.split(' ')[0]}! 👋
-                    </h2>
-                    <p className="text-gray-600 mb-6">
-                        Your AI-powered email assistant is ready to help you manage your inbox.
-                    </p>
+            {/* Main Chat Area */}
+            <main className="flex-1 overflow-hidden flex flex-col max-w-4xl w-full mx-auto">
+                {/* Messages Container */}
+                <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
+                    {messages.map((message, index) => (
+                        <ChatMessage
+                            key={index}
+                            message={message}
+                            isUser={message.role === 'user'}
+                        />
+                    ))}
 
-                    {/* Chatbot Interface - Placeholder for now */}
-                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center">
-                        <svg
-                            className="w-16 h-16 text-gray-400 mx-auto mb-4"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
+                    {isLoading && <LoadingSpinner message="AI is thinking..." />}
+
+                    {error && (
+                        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
+                            {error}
+                        </div>
+                    )}
+
+                    <div ref={messagesEndRef} />
+                </div>
+
+                {/* Input Area */}
+                <div className="border-t border-gray-200 bg-white px-4 py-4 flex-shrink-0">
+                    <form onSubmit={handleSendMessage} className="flex space-x-3">
+                        <input
+                            type="text"
+                            value={inputMessage}
+                            onChange={(e) => setInputMessage(e.target.value)}
+                            placeholder="Type your message... (e.g., 'Show my recent emails')"
+                            className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            disabled={isLoading}
+                        />
+                        <button
+                            type="submit"
+                            disabled={isLoading || !inputMessage.trim()}
+                            className="px-6 py-3 bg-primary-600 text-white rounded-lg font-medium hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         >
-                            <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                            />
-                        </svg>
-                        <h3 className="text-lg font-medium text-gray-900 mb-2">
-                            Chatbot Interface Coming Soon
-                        </h3>
-                        <p className="text-gray-600">
-                            The AI chatbot will be implemented in Phase 2
-                        </p>
-                    </div>
+                            <svg
+                                className="w-5 h-5"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                            >
+                                <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+                                />
+                            </svg>
+                        </button>
+                    </form>
+
+                    <p className="text-xs text-gray-500 mt-2 text-center">
+                        Try: "Show my recent emails" • "Generate replies" • "Delete email from..."
+                    </p>
                 </div>
             </main>
         </div>
