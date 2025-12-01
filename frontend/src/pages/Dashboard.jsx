@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { chatAPI } from '../services/api';
+import { chatAPI, emailAPI } from '../services/api';
 import ChatMessage from '../components/ChatMessage';
 import LoadingSpinner from '../components/LoadingSpinner';
+import EmailCard from '../components/EmailCard';
+import ReplyCard from '../components/ReplyCard';
 
 const Dashboard = () => {
     const { user, logout } = useAuth();
@@ -65,14 +67,21 @@ const Dashboard = () => {
         try {
             const response = await chatAPI.sendMessage(inputMessage);
 
-            setMessages((prev) => [
-                ...prev,
-                {
-                    role: 'assistant',
-                    content: response.message,
-                    timestamp: response.timestamp,
-                },
-            ]);
+            // Add AI response
+            const aiMessage = {
+                role: 'assistant',
+                content: response.message,
+                timestamp: response.timestamp,
+            };
+            setMessages((prev) => [...prev, aiMessage]);
+
+            // Handle intents
+            if (response.intent?.intent === 'READ_EMAILS') {
+                await fetchAndDisplayEmails();
+            } else if (response.intent?.intent === 'GENERATE_REPLIES') {
+                await fetchAndGenerateReplies();
+            }
+
         } catch (err) {
             console.error('Send message error:', err);
             setError('Failed to send message. Please try again.');
@@ -87,6 +96,188 @@ const Dashboard = () => {
         } finally {
             setIsLoading(false);
         }
+    };
+
+    const fetchAndDisplayEmails = async () => {
+        setIsLoading(true);
+        try {
+            const emails = await emailAPI.getRecentEmails();
+
+            if (emails.length === 0) {
+                setMessages(prev => [...prev, {
+                    role: 'assistant',
+                    content: "I couldn't find any recent emails in your inbox.",
+                    timestamp: new Date().toISOString()
+                }]);
+                return;
+            }
+
+            // Create a special message component for emails
+            const emailMessage = {
+                role: 'system',
+                type: 'email_list',
+                content: emails,
+                timestamp: new Date().toISOString()
+            };
+
+            setMessages(prev => [...prev, emailMessage]);
+
+        } catch (err) {
+            console.error('Fetch emails error:', err);
+            setMessages(prev => [...prev, {
+                role: 'assistant',
+                content: "I had trouble fetching your emails. Please check your connection or try again.",
+                timestamp: new Date().toISOString()
+            }]);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const fetchAndGenerateReplies = async () => {
+        setIsLoading(true);
+        try {
+            const emails = await emailAPI.getRecentEmails();
+
+            if (emails.length === 0) {
+                setMessages(prev => [...prev, {
+                    role: 'assistant',
+                    content: "No emails found to generate replies for.",
+                    timestamp: new Date().toISOString()
+                }]);
+                return;
+            }
+
+            setMessages(prev => [...prev, {
+                role: 'assistant',
+                content: `Generating replies for ${emails.length} emails...`,
+                timestamp: new Date().toISOString()
+            }]);
+
+            // Generate replies sequentially
+            const replies = [];
+            for (const email of emails) {
+                try {
+                    const reply = await emailAPI.generateReply(email.id);
+                    replies.push(reply);
+                } catch (e) {
+                    console.error(`Failed to generate reply for ${email.id}`, e);
+                }
+            }
+
+            if (replies.length > 0) {
+                const replyMessage = {
+                    role: 'system',
+                    type: 'reply_list',
+                    content: replies,
+                    timestamp: new Date().toISOString()
+                };
+                setMessages(prev => [...prev, replyMessage]);
+            } else {
+                throw new Error("Failed to generate any replies");
+            }
+
+        } catch (err) {
+            console.error('Generate replies error:', err);
+            setMessages(prev => [...prev, {
+                role: 'assistant',
+                content: "I encountered an error generating replies.",
+                timestamp: new Date().toISOString()
+            }]);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleGenerateReply = async (emailId) => {
+        setIsLoading(true);
+        try {
+            const reply = await emailAPI.generateReply(emailId);
+            const replyMessage = {
+                role: 'system',
+                type: 'reply_list',
+                content: [reply],
+                timestamp: new Date().toISOString()
+            };
+            setMessages(prev => [...prev, replyMessage]);
+        } catch (err) {
+            console.error('Generate single reply error:', err);
+            alert('Failed to generate reply');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleDeleteEmail = async (emailId) => {
+        try {
+            await emailAPI.deleteEmail(emailId);
+            setMessages(prev => [...prev, {
+                role: 'assistant',
+                content: "Email deleted successfully.",
+                timestamp: new Date().toISOString()
+            }]);
+        } catch (err) {
+            console.error('Delete email error:', err);
+            alert('Failed to delete email');
+        }
+    };
+
+    const handleSendReply = async (emailId, content) => {
+        try {
+            await emailAPI.sendReply(emailId, content);
+            setMessages(prev => [...prev, {
+                role: 'assistant',
+                content: "Reply sent successfully! 🚀",
+                timestamp: new Date().toISOString()
+            }]);
+        } catch (err) {
+            console.error('Send reply error:', err);
+            alert('Failed to send reply');
+            throw err;
+        }
+    };
+
+    // Custom renderer for messages including system components
+    const renderMessage = (msg, index) => {
+        if (msg.type === 'email_list') {
+            return (
+                <div key={index} className="mb-6 ml-4 max-w-[90%]">
+                    <p className="text-sm text-gray-500 mb-2">Here are your recent emails:</p>
+                    {msg.content.map(email => (
+                        <EmailCard
+                            key={email.id}
+                            email={email}
+                            onGenerateReply={handleGenerateReply}
+                            onDelete={handleDeleteEmail}
+                        />
+                    ))}
+                </div>
+            );
+        }
+
+        if (msg.type === 'reply_list') {
+            return (
+                <div key={index} className="mb-6 ml-4 max-w-[90%]">
+                    <p className="text-sm text-gray-500 mb-2">Here are the generated replies:</p>
+                    {msg.content.map((reply, i) => (
+                        <ReplyCard
+                            key={i}
+                            reply={reply}
+                            onSend={handleSendReply}
+                            onCancel={() => { }}
+                        />
+                    ))}
+                </div>
+            );
+        }
+
+        return (
+            <ChatMessage
+                key={index}
+                message={msg}
+                isUser={msg.role === 'user'}
+            />
+        );
     };
 
     return (
@@ -151,15 +342,9 @@ const Dashboard = () => {
             <main className="flex-1 overflow-hidden flex flex-col max-w-4xl w-full mx-auto">
                 {/* Messages Container */}
                 <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
-                    {messages.map((message, index) => (
-                        <ChatMessage
-                            key={index}
-                            message={message}
-                            isUser={message.role === 'user'}
-                        />
-                    ))}
+                    {messages.map((message, index) => renderMessage(message, index))}
 
-                    {isLoading && <LoadingSpinner message="AI is thinking..." />}
+                    {isLoading && <LoadingSpinner message="AI is working..." />}
 
                     {error && (
                         <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
