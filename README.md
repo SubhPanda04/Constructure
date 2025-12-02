@@ -102,7 +102,7 @@ npm run dev
 
 ## 🔗 Live Demo
 
-Live Vercel URL: [https://your-app-name.vercel.app](https://your-app-name.vercel.app)
+Live Vercel URL: [https://constructure-three.vercel.app/](https://constructure-three.vercel.app)
 
 ## ⚠️ Assumptions & Limitations
 
