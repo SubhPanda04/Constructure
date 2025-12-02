@@ -11,6 +11,7 @@ const Dashboard = () => {
     const [messages, setMessages] = useState([]);
     const [inputMessage, setInputMessage] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [loadingMessage, setLoadingMessage] = useState('AI is working...');
     const [error, setError] = useState(null);
     const messagesEndRef = useRef(null);
 
@@ -62,6 +63,7 @@ const Dashboard = () => {
         setMessages((prev) => [...prev, userMessage]);
         setInputMessage('');
         setIsLoading(true);
+        setLoadingMessage('Processing your request...');
         setError(null);
 
         try {
@@ -95,11 +97,13 @@ const Dashboard = () => {
             ]);
         } finally {
             setIsLoading(false);
+            setLoadingMessage('AI is working...');
         }
     };
 
     const fetchAndDisplayEmails = async () => {
         setIsLoading(true);
+        setLoadingMessage('Fetching emails from Gmail...');
         try {
             const emails = await emailAPI.getRecentEmails();
 
@@ -131,11 +135,13 @@ const Dashboard = () => {
             }]);
         } finally {
             setIsLoading(false);
+            setLoadingMessage('AI is working...');
         }
     };
 
     const fetchAndGenerateReplies = async () => {
         setIsLoading(true);
+        setLoadingMessage('Fetching emails and generating AI replies...');
         try {
             const emails = await emailAPI.getRecentEmails();
 
@@ -158,6 +164,7 @@ const Dashboard = () => {
             const replies = [];
             for (const email of emails) {
                 try {
+                    setLoadingMessage(`Generating reply for: ${email.subject.substring(0, 30)}...`);
                     const reply = await emailAPI.generateReply(email.id);
                     replies.push(reply);
                 } catch (e) {
@@ -186,11 +193,13 @@ const Dashboard = () => {
             }]);
         } finally {
             setIsLoading(false);
+            setLoadingMessage('AI is working...');
         }
     };
 
     const handleGenerateReply = async (emailId) => {
         setIsLoading(true);
+        setLoadingMessage('Generating AI reply...');
         try {
             const reply = await emailAPI.generateReply(emailId);
             const replyMessage = {
@@ -205,15 +214,34 @@ const Dashboard = () => {
             alert('Failed to generate reply');
         } finally {
             setIsLoading(false);
+            setLoadingMessage('AI is working...');
         }
     };
 
     const handleDeleteEmail = async (emailId) => {
+        if (!window.confirm('Are you sure you want to delete this email?')) {
+            return;
+        }
+
         try {
             await emailAPI.deleteEmail(emailId);
+
+            // Remove the email from the UI
+            setMessages(prev => prev.map(msg => {
+                if (msg.type === 'email_list') {
+                    const updatedEmails = msg.content.filter(e => e.id !== emailId);
+                    if (updatedEmails.length === 0) {
+                        return null;
+                    }
+                    return { ...msg, content: updatedEmails };
+                }
+                return msg;
+            }).filter(msg => msg !== null));
+
+            // Show success message
             setMessages(prev => [...prev, {
                 role: 'assistant',
-                content: "Email deleted successfully.",
+                content: "Email moved to trash successfully. ✅",
                 timestamp: new Date().toISOString()
             }]);
         } catch (err) {
@@ -225,6 +253,20 @@ const Dashboard = () => {
     const handleSendReply = async (emailId, content) => {
         try {
             await emailAPI.sendReply(emailId, content);
+
+            // Remove the reply from the UI
+            setMessages(prev => prev.map(msg => {
+                if (msg.type === 'reply_list') {
+                    const updatedReplies = msg.content.filter(r => r.email_id !== emailId);
+                    if (updatedReplies.length === 0) {
+                        return null;
+                    }
+                    return { ...msg, content: updatedReplies };
+                }
+                return msg;
+            }).filter(msg => msg !== null));
+
+            // Show success message
             setMessages(prev => [...prev, {
                 role: 'assistant',
                 content: "Reply sent successfully! 🚀",
@@ -235,6 +277,22 @@ const Dashboard = () => {
             alert('Failed to send reply');
             throw err;
         }
+    };
+
+    const handleDiscardReply = (replyEmailId) => {
+        // Remove the reply message that contains this specific reply
+        setMessages(prev => prev.map(msg => {
+            if (msg.type === 'reply_list') {
+                // Filter out the discarded reply
+                const updatedReplies = msg.content.filter(r => r.email_id !== replyEmailId);
+                // If no replies left, remove the entire message
+                if (updatedReplies.length === 0) {
+                    return null;
+                }
+                return { ...msg, content: updatedReplies };
+            }
+            return msg;
+        }).filter(msg => msg !== null));
     };
 
     // Custom renderer for messages including system components
@@ -264,7 +322,7 @@ const Dashboard = () => {
                             key={i}
                             reply={reply}
                             onSend={handleSendReply}
-                            onCancel={() => { }}
+                            onCancel={() => handleDiscardReply(reply.email_id)}
                         />
                     ))}
                 </div>
@@ -344,7 +402,7 @@ const Dashboard = () => {
                 <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
                     {messages.map((message, index) => renderMessage(message, index))}
 
-                    {isLoading && <LoadingSpinner message="AI is working..." />}
+                    {isLoading && <LoadingSpinner message={loadingMessage} />}
 
                     {error && (
                         <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
