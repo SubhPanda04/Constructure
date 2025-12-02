@@ -65,7 +65,7 @@ export const emailAPI = {
     sendReply: async (emailId, replyContent) => {
         const response = await api.post('/api/emails/send-reply', {
             email_id: emailId,
-            content: replyContent,
+            reply_content: replyContent,
         });
         return response.data;
     },
