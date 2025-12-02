@@ -6,6 +6,7 @@ from app.config import get_settings
 from models.user import UserProfile, GoogleTokens
 from typing import Tuple, Optional
 import os
+from utils.logger import log_auth_attempt, log_auth_success, log_auth_failure
 
 settings = get_settings()
 
@@ -66,6 +67,8 @@ class AuthService:
             redirect_uri=settings.google_redirect_uri
         )
         
+        log_auth_attempt("unknown")
+        
         # Exchange code for tokens
         flow.fetch_token(code=code)
         credentials = flow.credentials
@@ -97,6 +100,7 @@ class AuthService:
             'profile': user_profile
         }
         
+        log_auth_success(user_profile.email)
         return google_tokens, user_profile
     
     def get_user_session(self, email: str) -> Optional[dict]:
@@ -153,6 +157,7 @@ class AuthService:
         """
         if email in user_sessions:
             del user_sessions[email]
+            log_auth_success(f"Logout: {email}")
             return True
         return False
 
