@@ -1,16 +1,18 @@
-from openai import OpenAI
+from groq import Groq
 from app.config import get_settings
 from models.chat import IntentClassification, ChatMessage
 from typing import List, Optional
 import json
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from utils.logger import log_ai_call, log_ai_success, log_ai_error, log_ai_retry
 
 settings = get_settings()
 
 
 class AIService:
     def __init__(self):
-        self.client = OpenAI(api_key=settings.openai_api_key)
-        self.model = "gpt-4o-mini" 
+        self.client = Groq(api_key=settings.groq_api_key)
+        self.model = "llama-3.3-70b-versatile"  # Fast and high-quality 
     
     def parse_intent(self, user_message: str, conversation_history: List[ChatMessage] = None) -> IntentClassification:
         """
@@ -82,9 +84,15 @@ Examples:
                 parameters={}
             )
     
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(Exception),
+        before_sleep=lambda retry_state: log_ai_retry("email_summary", retry_state.attempt_number)
+    )
     def summarize_email(self, email_body: str, subject: str) -> str:
         """
-        Generate a concise summary of an email.
+        Generate a concise summary of an email with retry logic.
         
         Args:
             email_body: The email content
@@ -93,12 +101,13 @@ Examples:
         Returns:
             AI-generated summary
         """
-        prompt = f"""Summarize this email in 1-2 concise sentences. Focus on the main point and any action items.
+        log_ai_call("email_summary", "system")
+        prompt = f"""Summarize this email in 2-3 concise sentences. Focus on the main point and any action items.
 
 Subject: {subject}
 
 Email:
-{email_body[:1000]}  # Limit to first 1000 chars
+{email_body[:10000]}  # Limit to first 10000 chars
 
 Summary:"""
         
@@ -109,18 +118,25 @@ Summary:"""
                     {"role": "system", "content": "You are a helpful email summarizer. Be concise and clear."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.5,
-                max_tokens=100
+                temperature=0.3,
+                max_tokens=120
             )
-            
-            return response.choices[0].message.content.strip()
+            result = response.choices[0].message.content.strip()
+            log_ai_success("email_summary", "system")
+            return result
         except Exception as e:
-            print(f"Email summarization error: {e}")
-            return "Unable to generate summary."
+            log_ai_error("email_summary", "system", str(e))
+            raise
     
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(Exception),
+        before_sleep=lambda retry_state: log_ai_retry("email_reply", retry_state.attempt_number)
+    )
     def generate_email_reply(self, email_body: str, subject: str, sender: str) -> str:
         """
-        Generate a professional email reply.
+        Generate a professional email reply with retry logic.
         
         Args:
             email_body: Original email content
@@ -130,8 +146,11 @@ Summary:"""
         Returns:
             AI-generated reply
         """
+        log_ai_call("email_reply", "system")
         prompt = f"""Generate a professional and context-aware reply to this email.
 The reply should be polite, clear, and address the main points.
+
+IMPORTANT: Do NOT include a subject line in your response. Only provide the email body text.
 
 From: {sender}
 Subject: {subject}
@@ -139,7 +158,7 @@ Subject: {subject}
 Original Email:
 {email_body[:1500]}
 
-Generate a professional reply:"""
+Generate a professional reply (body text only, no subject line):"""
         
         try:
             response = self.client.chat.completions.create(
@@ -148,14 +167,15 @@ Generate a professional reply:"""
                     {"role": "system", "content": "You are a professional email assistant. Write clear, polite, and helpful email replies."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.7,
-                max_tokens=300
+                temperature=0.5,
+                max_tokens=250
             )
-            
-            return response.choices[0].message.content.strip()
+            result = response.choices[0].message.content.strip()
+            log_ai_success("email_reply", "system")
+            return result
         except Exception as e:
-            print(f"Reply generation error: {e}")
-            return "Unable to generate reply."
+            log_ai_error("email_reply", "system", str(e))
+            raise
     
     def generate_chat_response(
         self, 
